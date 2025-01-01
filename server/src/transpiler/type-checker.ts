@@ -8,7 +8,7 @@ import { ArrayType, StaticType, ByteArrayClass, isPrimitiveType } from './types'
 
 import {
   Integer, Float, BooleanT, StringT, Void, Null, Any,
-  ObjectType, FunctionType, objectType,
+  ObjectType, FunctionType, OptionalType, objectType,
   typeToString, isSubtype, isConsistent, commonSuperType,
   isNumeric
 } from './types'
@@ -156,14 +156,17 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
 
   nullLiteral(node: AST.NullLiteral, names: NameTable<Info>): void {
     this.result = Null
+    this.addStaticType(node, this.result)
   }
 
   stringLiteral(node: AST.StringLiteral, names: NameTable<Info>): void {
     this.result = StringT
+    this.addStaticType(node, this.result)
   }
 
   booleanLiteral(node: AST.BooleanLiteral, names: NameTable<Info>): void {
     this.result = BooleanT
+    this.addStaticType(node, this.result)
   }
 
   numericLiteral(node: AST.NumericLiteral, names: NameTable<Info>): void {
@@ -181,6 +184,7 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
   identifier(node: AST.Identifier, names: NameTable<Info>): void {
     if (node.name === 'undefined') {
       this.result = Null
+      this.addStaticType(node, this.result)
       return
     }
 
@@ -188,6 +192,7 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
     if (nameInfo !== undefined) {
       if (this.assert(!nameInfo.isTypeName, `bad use of type name: ${node.name}`, node)) {
         this.result = nameInfo.type
+        this.addStaticType(node, this.result)
         return
       }
     }
@@ -195,6 +200,7 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
       this.assert(this.firstPass, `unknown name: ${node.name}`, node)
 
     this.result = Any
+    this.addStaticType(node, this.result)
   }
 
   whileStatement(node: AST.WhileStatement, names: NameTable<Info>): void {
@@ -1284,6 +1290,27 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
   tsTypeAliasDeclaration(node: AST.TSTypeAliasDeclaration, env: NameTable<Info>): void {
     const name = node.id.name
     this.assert(name === 'integer' || name === 'float', 'type alias is not supported', node)
+  }
+
+  tsUnionType(node: AST.TSUnionType, env: NameTable<Info>): void {
+    // the following 4 syntax are allowed to denote optional types
+    // 1. T | null
+    // 2. T | undefined
+    // T cannot be neither null, undefined, any, nor an optional type
+    this.assert(node.types.length === 2, 'only optional types are supported -- the number of options must be 2', node)
+    this.visit(node.types[0], env)
+    let t1: StaticType = this.result
+    this.visit(node.types[1], env)
+    let t2: StaticType = this.result
+    // TODO: move the following lines to "assertUnionType()"
+    this.assert(t1 === Null || t2 === Null, 'only optional types are supported -- at least one option must be undefined', node)
+    this.assert(t1 !== Null || t2 !== Null, 'only optional types are supported -- at least one option must be a non-undefined type', node)
+    if (t1 === Null) [t1, t2] = [t2, t1]
+    this.assert(t1 !== Any, 'fail to construct an optional type -- any is already optional', node)
+    this.assert(!(t1 instanceof OptionalType), `fail to construct an optional type -- "${ typeToString(t1) }" is already optional`, node)
+    // CHECKIT: should I prohibit optional function types?
+    // this.assert(!(t1 instanceof FunctionType), 'an optional function type is not supported', node)
+    this.result = new OptionalType(t1)
   }
 
   exportNamedDeclaration(node: AST.ExportNamedDeclaration, env: NameTable<Info>): void {

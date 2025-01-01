@@ -117,6 +117,34 @@ export class ArrayType extends ObjectType {
   }
 }
 
+export type Nullability = 'PossiblyNullable' | 'Nullable' | 'NonNullable' | 'Inconsistent'
+
+export class OptionalType extends ObjectType {
+  elementType: StaticType
+  nullability: Nullability
+
+  constructor(elementType: StaticType, nullability: Nullability = 'PossiblyNullable') {
+    super()
+    
+    this.elementType = elementType
+    this.nullability = nullability
+  }
+
+  name(): string {
+    // CHECKIT: should name() depend on its context?
+    if (this.nullability === 'NonNullable') return typeToString(this.elementType)
+    else return `${ typeToString(this.elementType) } | undefined`
+  }
+
+  isSubtypeOf(t: StaticType): boolean {
+    return (t instanceof OptionalType && isSubtype(this.elementType, t.elementType))
+  }
+
+  sameType(t: StaticType): boolean {
+    return t instanceof OptionalType && sameType(this.elementType, t.elementType)
+  }
+}
+
 // type name used for error messages
 export function typeToString(type: StaticType): string {
   if (type instanceof CompositeType)
@@ -146,6 +174,8 @@ export function encodeType(type: StaticType): string {
   default:
     if (type instanceof ArrayType)
       return '[' + encodeType(type.elementType)
+    else if (type instanceof OptionalType)
+      return '?' + encodeType(type.elementType)
     else if (type instanceof FunctionType)
       return `(${type.paramTypes.map(e => encodeType(e)).join('')})${encodeType(type.returnType)}`
     else if (type instanceof ObjectType)
@@ -166,6 +196,10 @@ export function isSubtype(subtype: StaticType, type: StaticType): boolean {
     return true
   else if (type === BooleanT)
     return subtype === BooleanT
+  else if (subtype instanceof OptionalType)
+    return subtype.isSubtypeOf(type)
+  else if (type instanceof OptionalType)
+    return subtype === Null || isSubtype(subtype, type.elementType)
   else if (subtype instanceof CompositeType)
     return subtype.isSubtypeOf(type)
   else
